@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base target="_top">
+  <script>
+    /**
+     * https://gist.github.com/torufurukawa/64339baf16efd3598e71dd763d1db0cf
+     * google.script.run を async/await で使う
+     * https://note.com/torufurukawa/n/n23610ee49b4a
+     */
+    function scriptRunPromise() {
+      const gs = {};
+      // google.script.run contains doSomething() methods at runtime.
+      // Object.keys(goog.sscript.run) returns array of method names.
+      const keys = Object.keys(google.script.run);
+      // for each key, i.e. method name...
+      for (let i = 0; i < keys.length; i++) {
+        // assign the function to gs.doSomething() which returns...
+        gs[keys[i]] = (function (key) {
+          // a function which accepts arbitrary args and returns...
+          return function (...args) {
+            // a promise that executes ...
+            return new Promise(function (resolve, reject) {
+              google.script.run
+                .withSuccessHandler(resolve)
+                .withFailureHandler(reject)[key]
+                .apply(google.script.run, args);
+            });
+          };
+        })(keys[i]);
+      }
+      return gs;
+      // gs.doSomething() returns a promise that will execulte 
+      // google.script.run.withSuccessHandler(...).withFailureHandler(...).doSomething()
+    }
+
+    /**
+     * 【JavaScript】指定した並列数で並列処理を行う関数
+     * https://qiita.com/sdkei/items/6b8dccbc0d462c9eb0bd
+     */
+    /**
+     * 与えられたイテラブルから得られる関数を順に、
+     * 指定された数まで並列に実行する。
+     * 
+     * @param iterable {Iterable<() => Promise<void>}
+     *  実行したい関数を要素に持つイテラブル。
+     *  各関数は引数を持たず、Promise を返す。
+     * @param concurrency {number} この数まで並列に実行する。
+     * @return {Promise<void>}
+     *  全ての関数を実行し終えると resolve される Promise。
+     */
+    async function runConcurrentlyAsync(iterable, concurrency) {
+      const iterator = iterable[Symbol.iterator]();
+      let index = 0; // ログ用
+      const promises = Array.from({ length: concurrency }, (_, id) => {
+        return new Promise(async (resolve) => {
+          for (let result = iterator.next(); !result.done; result = iterator.next()) {
+            const i = index++;
+            console.log(`${id}: ${i}...`);
+            await result.value();
+            console.log(`        ...${id}: ${i}`);
+          }
+          resolve();
+        });
+      });
+      await Promise.all(promises);
+    }
+
+
+  </script>
+</head>
+
+<body>
+
+</body>
+
+</html>
