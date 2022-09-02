@@ -1,78 +1,114 @@
 <!DOCTYPE html>
 <html>
+  <head>
+    <base target="_top" />
+    <script>
+      // https://gist.github.com/torufurukawa/64339baf16efd3598e71dd763d1db0cf
+      function scriptRunPromise() {
+        const gs = {};
+        // google.script.run contains doSomething() methods at runtime.
+        // Object.keys(goog.sscript.run) returns array of method names.
+        const keys = Object.keys(google.script.run);
 
-<head>
-  <base target="_top">
-  <script>
-    /**
-     * https://gist.github.com/torufurukawa/64339baf16efd3598e71dd763d1db0cf
-     * google.script.run を async/await で使う
-     * https://note.com/torufurukawa/n/n23610ee49b4a
-     */
-    function scriptRunPromise() {
-      const gs = {};
-      // google.script.run contains doSomething() methods at runtime.
-      // Object.keys(goog.sscript.run) returns array of method names.
-      const keys = Object.keys(google.script.run);
-      // for each key, i.e. method name...
-      for (let i = 0; i < keys.length; i++) {
-        // assign the function to gs.doSomething() which returns...
-        gs[keys[i]] = (function (key) {
-          // a function which accepts arbitrary args and returns...
-          return function (...args) {
-            // a promise that executes ...
-            return new Promise(function (resolve, reject) {
-              google.script.run
-                .withSuccessHandler(resolve)
-                .withFailureHandler(reject)[key]
-                .apply(google.script.run, args);
-            });
-          };
-        })(keys[i]);
+        // for each key, i.e. method name...
+        for (let i = 0; i < keys.length; i++) {
+          // assign the function to gs.doSomething() which returns...
+          gs[keys[i]] = (function (key) {
+            // a function which accepts arbitrary args and returns...
+            return function (...args) {
+              // a promise that executes ...
+              return new Promise(function (resolve, reject) {
+                google.script.run
+                  .withSuccessHandler(resolve)
+                  .withFailureHandler(reject)
+                  [key].apply(google.script.run, args);
+              });
+            };
+          })(keys[i]);
+        }
+        return gs;
+        // gs.doSomething() returns a promise that will execulte
+        // google.script.run.withSuccessHandler(...).withFailureHandler(...).doSomething()
       }
-      return gs;
-      // gs.doSomething() returns a promise that will execulte 
-      // google.script.run.withSuccessHandler(...).withFailureHandler(...).doSomething()
-    }
 
-    /**
-     * 【JavaScript】指定した並列数で並列処理を行う関数
-     * https://qiita.com/sdkei/items/6b8dccbc0d462c9eb0bd
-     */
-    /**
-     * 与えられたイテラブルから得られる関数を順に、
-     * 指定された数まで並列に実行する。
-     * 
-     * @param iterable {Iterable<() => Promise<void>}
-     *  実行したい関数を要素に持つイテラブル。
-     *  各関数は引数を持たず、Promise を返す。
-     * @param concurrency {number} この数まで並列に実行する。
-     * @return {Promise<void>}
-     *  全ての関数を実行し終えると resolve される Promise。
-     */
-    async function runConcurrentlyAsync(iterable, concurrency) {
-      const iterator = iterable[Symbol.iterator]();
-      let index = 0; // ログ用
-      const promises = Array.from({ length: concurrency }, (_, id) => {
-        return new Promise(async (resolve) => {
-          for (let result = iterator.next(); !result.done; result = iterator.next()) {
-            const i = index++;
-            console.log(`${id}: ${i}...`);
-            await result.value();
-            console.log(`        ...${id}: ${i}`);
-          }
-          resolve();
+      /**
+       * 与えられたイテラブルから得られる関数を順に、
+       * 指定された数まで並列に実行する。
+       *
+       * @param iterable {Iterable<() => Promise<void>}
+       *  実行したい関数を要素に持つイテラブル。
+       *  各関数は引数を持たず、Promise を返す。
+       * @param concurrency {number} この数まで並列に実行する。
+       * @return {Promise<void>}
+       *  全ての関数を実行し終えると resolve される Promise。
+       */
+      async function runConcurrentlyAsync(iterable, concurrency) {
+        const iterator = iterable[Symbol.iterator]();
+        let index = 0; // ログ用
+        const promises = Array.from({ length: concurrency }, (_, id) => {
+          return new Promise(async (resolve) => {
+            for (
+              let result = iterator.next();
+              !result.done;
+              result = iterator.next()
+            ) {
+              const i = index++;
+              console.log(`${id}: ${i}...`);
+
+              await result.value();
+
+              console.log(`        ...${id}: ${i}`);
+            }
+
+            resolve();
+          });
         });
+        await Promise.all(promises);
+      }
+
+      document.addEventListener('DOMContentLoaded', () => {
+        console.log('html: start');
+        scriptRunPromise()
+          .getList()
+          .then((resolve) => search(resolve));
       });
-      await Promise.all(promises);
-    }
 
+      async function asyncFuncSearch(word) {
+        return scriptRunPromise()
+          .search(word)
+          .then((resolve) => add(resolve));
+      }
 
-  </script>
-</head>
+      let num = 1;
+      function search(words) {
+        console.log(`hrml search: ${words}`);
+        const INIT = 0;
+        const MAX = words.length;
+        const CONCURRENCY = 1; // 同時実行できる数を定義
 
-<body>
+        const generator = (function* createGenerator() {
+          for (let i = 0; i < MAX; i++) {
+            const word = words[i][0];
+            yield async () => await asyncFuncSearch(word);
+          }
+        })();
+        runConcurrentlyAsync(generator, CONCURRENCY).then((resolve) =>
+          google.script.host.close()
+        );
+      }
 
-</body>
+      function add(data) {
+        const result = data.result;
+        const word = data.word;
+        console.log(`html add ${data}`);
+        for (let j = 0; j < result.length; j++) {
+          google.script.run.withSuccessHandler().addRow(word, result[j], num++);
+        }
+      }
+    </script>
+  </head>
 
+  <body>
+    <p id="num">-1</p>
+  </body>
 </html>
